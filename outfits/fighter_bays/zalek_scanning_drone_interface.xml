@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<outfit name="Za'lek Scanning Drone Interface">
+ <general>
+  <slot prop="fighter_bay">weapon</slot>
+  <size>small</size>
+  <license>Light Combat Vessel</license>
+  <cond>faction.playerStanding("Za'lek") &gt;= 20</cond>
+  <condstr>You need at least 20 reputation with House Za'lek.</condstr>
+  <rarity>1</rarity>
+  <mass>10</mass>
+  <price>300000</price>
+  <gfx_store>zalek_drone_light_fighter.webp</gfx_store>
+  <description>This bay is built to launch a Za'lek Scanner Drone. The drone reveals information about other ships' outfits. It comes with all the devices required for the maintenance and flight of the drone.</description>
+  <cpu>-65</cpu>
+ </general>
+ <specific type="fighter bay" secondary="1">
+  <delay>2</delay>
+  <reload_time>60</reload_time>
+  <amount>1</amount>
+  <ship>Za'lek Scanner Drone</ship>
+  <ship_mass>50</ship_mass>
+ </specific>
+</outfit>
