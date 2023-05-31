@@ -39,7 +39,6 @@ end
 
 local shuttle_outfits
 local function add_outfit( oname )
-    print(fmt.f("adding {this}", {this=oname}))
 	if player.numOutfit( oname, true ) > 0 then
 		shuttle_outfits[#shuttle_outfits + 1] = oname
 		return true
@@ -168,14 +167,12 @@ end
 
 function auxiliary_ship_mission()
 	local template = pilot.add("Cargo Shuttle", "Trader", player.pilot():pos())
-    print(shuttle_outfits)
 	if shuttle_outfits then
 		template:outfitRm("all")
 --		template:outfitRm("cores")
 		template:outfitRm( "Unicorp PT-16 Core System")
 		template:outfitAdd("Unicorp PT-68 Core System")
 		for _j, o in ipairs(shuttle_outfits) do
-            print(fmt.f("try to add {outfit}", {outfit=o}))
 			template:outfitAdd(o, 1 , true, false)
 		end
 	end
