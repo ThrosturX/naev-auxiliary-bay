@@ -2,6 +2,9 @@
 
 This plugin provides the necessary files to fly an auxiliary ship if you have the required outfit.
 
+## Deprecation notice!
+This plugin was made for an earlier version of Naev, and will not run on the current version without modification.
+
 ## Usage
 Purchase the **Auxiliary Ship Bay** at any outfitter that sells trading (cargo) outfits and install it on your ship.
 Once you have installed the outfit, you can go for a *joyride* by opening the menu and pressing **S** or clicking the **Launch Auxiliary Ship** button.
