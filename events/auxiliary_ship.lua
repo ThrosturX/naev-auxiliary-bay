@@ -309,5 +309,5 @@ end
 
 showButton = function ()
 	hideButton()
-	infobtn = player.infoButtonRegister( _("Launch Auxiliary Ship"), auxiliary_ship_mission, 3, "S" )
+	infobtn = player.infoButtonRegister( _("Launch Auxiliary Ship"), auxiliary_ship_mission, 3, "L" )
 end
