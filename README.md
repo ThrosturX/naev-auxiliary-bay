@@ -2,12 +2,9 @@
 
 This plugin provides the necessary files to fly an auxiliary ship if you have the required outfit.
 
-## Deprecation notice!
-This plugin was made for an earlier version of Naev, and will not run on the current version without modification.
-
 ## Usage
 Purchase the **Auxiliary Ship Bay** at any outfitter that sells trading (cargo) outfits and install it on your ship.
-Once you have installed the outfit, you can go for a *joyride* by opening the menu and pressing **S** or clicking the **Launch Auxiliary Ship** button.
+Once you have installed the outfit, you can go for a *joyride* by activating the outfit (it works like a fighter bay).
 
 While *joyriding* in a cargo shuttle, you will be unable to dock, save the game or jump via hyperspace. Your ship will follow you as if it were an escort.
 Board your ship again to return the cargo shuttle to the bay.

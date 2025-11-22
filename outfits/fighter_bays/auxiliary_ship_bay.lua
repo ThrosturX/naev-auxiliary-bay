@@ -72,6 +72,7 @@ local function configure_outfits()
     end
 end
 
+-- NOTE: Not implemented: outfit states, etc, the spawned 'ghost' is pretty much a naive copy
 local function spawn_ghost()
     if
         naev.cache().joyride
