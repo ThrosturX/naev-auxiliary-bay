@@ -23,7 +23,7 @@ local DRONE_SEARCH_INTERVAL = 3
 function scan_drone_enter()
     -- check if we have a bay installed
     for _i, outf in ipairs(player.pilot():outfits()) do
-        if outf:nameRaw() == "Za'lek Scanning Drone Interface" then
+        if outf and outf:nameRaw() == "Za'lek Scanning Drone Interface" then
             hook.timer(DRONE_SEARCH_INTERVAL, "find_drone")
             return
         end
