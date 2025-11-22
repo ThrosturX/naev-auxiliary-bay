@@ -1,5 +1,6 @@
 local fmt = require "format"
 local der = require "common.derelict"
+local joyride = require "joyride"
 
 local shuttle_outfits
 local function add_outfit( oname )
@@ -72,132 +73,36 @@ local function configure_outfits()
     end
 end
 
--- NOTE: Not implemented: outfit states, etc, the spawned 'ghost' is pretty much a naive copy
-local function spawn_ghost()
-    if
-        naev.cache().joyride
-    then
-        if naev.cache().joyride.hook then
-            hook.rm(naev.cache().joyride.hook)
-            naev.cache().joyride.hook = nil
-        end
-        local pp = player.pilot()
-        local fakefac = faction.dynAdd(pp:faction():name(), naev.cache().joyride.mothership, naev.cache().joyride.mothership, { ai = "escort_guardian", clear_enemies = true})
-
-        naev.cache().joyride.pilot = pilot.add(naev.cache().joyride.ship, fakefac, naev.cache().joyride.pos, naev.cache().joyride.mothership, { naked = true })
-        -- match speed and velocity
-        naev.cache().joyride.pilot:setDir(naev.cache().joyride.dir)
-        naev.cache().joyride.pilot:setVel(naev.cache().joyride.vel)
-        -- and outfits
-        for _j, o in ipairs(naev.cache().joyride.outfits) do
-            naev.cache().joyride.pilot:outfitAdd(o)
-        end
-        -- put the cargo back
-        for k, v in pairs(naev.cache().joyride.cargo) do
-            -- the player took the mission cargo
-            if not v.m then
-                naev.cache().joyride.pilot:cargoAdd( v.name, v.q )
-            end
-        end
-        naev.cache().joyride.pilot:setVisplayer(true)
-        naev.cache().joyride.pilot:setNoClear(true)
-        naev.cache().joyride.pilot:setNoLand(true)
-        naev.cache().joyride.pilot:setNoJump(true)
-        naev.cache().joyride.pilot:setActiveBoard(true)
-        naev.cache().joyride.pilot:setHilight(true)
-        naev.cache().joyride.pilot:setFriendly(true)
-        naev.cache().joyride.pilot:setInvincPlayer(true)
-        -- Handled by event
-        -- hook.pilot(naev.cache().joyride.pilot, "board", "auxiliary_ship_return")
-    end
-end
-local function auxiliary_ship_mission( in_pilot )
-    local template = pilot.add("Cargo Shuttle", "Trader", player.pilot():pos())
-    -- Shuttle outfits was here
-
-    local pp = in_pilot
-
-    naev.cache().joyride = {}
-    naev.cache().joyride.mothership = player.ship()
-    naev.cache().joyride.ship = pp:ship()
-    naev.cache().joyride.pos = pp:pos()
-    naev.cache().joyride.dir = pp:dir()
-    naev.cache().joyride.vel = pp:vel()
-    naev.cache().joyride.outfits = pp:outfitsList()
-    naev.cache().joyride.cargo = pp:cargoList()
-
-    local cl = pp:cargoList()
-    for k, v in pairs( cl ) do
-        if not v.m then
-            -- goes into the placeholder ship
-            pp:cargoRm( v.name, v.q )
-        end
-    end
-
-    local desired_fuel = template:stats().fuel_consumption
-    local reserved_fuel
-    if pp:stats().fuel > desired_fuel + pp:stats().fuel_consumption then
-        reserved_fuel = desired_fuel
-        -- unfuel the ship before we hand it over
-        pp:setFuel(pp:stats().fuel - reserved_fuel)
-    end
-
-    -- create and swap to the shuttle here
-    pp:hookClear() -- clear player hooks to prevent errors
+-- NOTE:  in_pilot must be the player
+local function aux_mission( in_pilot )
+    -- setup
+    local template = pilot.add("Cargo Shuttle", "Trader", player.pilot():pos(), ship_name)
+    local ship_name = fmt.f( _("{name}'s Shuttle"), {name = player:ship() } )
     local acquired = fmt.f(_("The shuttle bay of your {mothership}."), { mothership = player:ship() } )
+    
+    -- main heavy lifter
+    local pp = joyride.swap_to_subship( in_pilot, template, acquired )
 
-    local shuttle_name = fmt.f( _("{name}'s Shuttle"), {name = player:ship() } )
-    local newship = player.shipAdd("Cargo Shuttle", shuttle_name, acquired, true)
-    player.shipSwap( newship , false, false)
-
-    -- fix the velocity vector and direction
-    in_pilot:setVel(naev.cache().joyride.vel)
-    in_pilot:setDir(naev.cache().joyride.dir)
-
-    -- perform refit
-    pp = in_pilot
-    pp:setFuel(0)   -- don't start with free fuel
-    pp:outfitRm( "all" )
-    pp:outfitRm( "cores" )
-
-    for _j, o in ipairs( template:outfitsList() ) do
-        pp = in_pilot -- not sure why I'm doing this, but swapship.swap#116 does this
-        pp:outfitAdd(o, 1 , true)
-    end
-    player.allowSave(false)
-    der.sfx.unboard:play()
-    template:rm()
-
-    -- create the player's ship in space
-    spawn_ghost()
-    naev.cache().joyride.pilot:changeAI( "escort_guardian" )
-
-    -- unregister the info button, need to hail the mothership now
+    -- extra fluff comes here
+    -- can't let the player land in a cargo shuttle that wasn't owned by the player
     player.landAllow ( false, _("The shuttle is only suited for light space travel.") )
     player.pilot():setNoJump(true)
 
-    -- risky
+    -- risky?
     player.pilot():hookClear() -- clear player hooks to prevent errors
 
     player.pilot():setHealth(100, 75, 25)
     player.pilot():setEnergy(35)
 
-    if reserved_fuel then
-        pp:setFuel(reserved_fuel)
-    else
-        pp:setFuel(0)   -- don't start with free fuel
-    end
-
-    local c = naev.cache()
-    c.player_mothership = naev.cache().joyride.mothership
-
     return true
+
 end
 
 function ontoggle( p, po, on )
     if naev.cache().joyride == nil then
         configure_outfits()
-        return auxiliary_ship_mission( p )
+        return aux_mission( p )
+        -- return auxiliary_ship_mission( p )
     end
     po:state("off")
 end
