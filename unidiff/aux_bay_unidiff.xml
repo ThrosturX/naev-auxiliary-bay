@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<unidiff name="aux_bay_unidiff">
+ <tech name="All Outfits">
+  <item_add>Auxiliary Ship Bay</item_add>
+  <item_add>Za'lek Scanning Drone Interface</item_add>
+ </tech>
+ <tech name="Cargo Trader Outfits">
+  <item_add>Auxiliary Ship Bay</item_add>
+ </tech>
+ <tech name="Za'lek Outfits Medium">
+  <item_add>Za'lek Scanning Drone Interface</item_add>
+ </tech>
+ <tech name="All Ships">
+  <item_add>Cargo Shuttle</item_add>
+ </tech>
+</unidiff>

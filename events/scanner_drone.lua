@@ -19,9 +19,17 @@ function create()
 	hook.enter("scan_drone_enter")
 end
 
-local DRONE_SEARCH_INTERVAL = 6
+local DRONE_SEARCH_INTERVAL = 3
 function scan_drone_enter()
-	hook.timer(DRONE_SEARCH_INTERVAL, "find_drone")
+    -- check if we have a bay installed
+    for _i, outf in ipairs(player.pilot():outfits()) do
+        if outf:nameRaw() == "Za'lek Scanning Drone Interface" then
+            hook.timer(DRONE_SEARCH_INTERVAL, "find_drone")
+            return
+        end
+    end
+    -- maybe we'll change ships somehow, e.g. with the aux bay
+    hook.ship_swap("scan_drone_enter")
 end
 
 local function enable( t )
@@ -59,7 +67,7 @@ local function get_target_outfit()
 	return { name = function () return _("No signatures disrupted") end }
 end
 
-local SCAN_TIME = 8
+local SCAN_TIME = 4
 local function do_scan( dt )
 	if not mem.timer then
 		mem.timer = SCAN_TIME
