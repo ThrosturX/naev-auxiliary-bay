@@ -4,11 +4,13 @@
   <slot prop="fighter_bay">weapon</slot>
   <size>medium</size>
   <license>Light Combat Vessel</license>
-  <rarity>2</rarity>
-  <mass>120</mass>
+  <rarity>3</rarity>
+  <mass>220</mass>
   <price>1000000</price>
   <gfx_store>aux_bay.webp</gfx_store>
   <description>This bay allows you to install an auxiliary ship in a bay-capable ship.</description>
  </general>
- <specific type="modification" />
+ <specific type="modification">
+     <lua>outfits/fighter_bays/auxiliary_ship_bay.lua</lua>
+ </specific>
 </outfit>

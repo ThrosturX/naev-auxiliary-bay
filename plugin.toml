@@ -1,0 +1,11 @@
+identifier = "evoFactions"
+name = "Auxiliary Ship Bay"
+author = "ThrosturX"
+version = "0.12.9"
+abstract = "Adds a new outfit, the Auxiliary Ship Bay, which allows the user to go for a joyride in a small cargo shuttle."
+description = "The Auxiliary Ship Bay allows the user to go for a joyride in a small cargo shuttle. There's also a new Za'lek drone for scanning ship outfits. This plugin was originally made for naev version 0.10 as a proof-of-concept to prepare for ship capturing, so it's a little dated, but it mostly works. In its current state, the plugin is a proof of concept for a `joyriding` mechanic."
+image_url = "https://github.com/ThrosturX/naev-auxiliary-bay/blob/main/gfx/outfit/store/aux_bay.webp?raw=true"
+release_status = "development"
+naev_version = ">= 0.13.0"
+source = { git = "https://github.com/ThrosturX/naev-auxiliary-bay.git" }
+
