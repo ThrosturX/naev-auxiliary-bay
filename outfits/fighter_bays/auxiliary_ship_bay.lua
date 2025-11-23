@@ -1,6 +1,7 @@
 local fmt = require "format"
 local der = require "common.derelict"
 local joyride = require "joyride"
+local pir = require "common.pirate"
 
 local shuttle_outfits
 local function add_outfit( oname )

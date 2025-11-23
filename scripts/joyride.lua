@@ -34,7 +34,7 @@ local function spawn_ghost()
         naev.cache().joyride.pilot:setHilight(true)
         naev.cache().joyride.pilot:setFriendly(true)
         naev.cache().joyride.pilot:setInvincPlayer(true)
-        -- Handled by events/joyride.lua
+        -- Handled by events/joyride_handler.lua
         -- hook.pilot(naev.cache().joyride.pilot, "board", "auxiliary_ship_return")
     end
 end
