@@ -86,9 +86,12 @@ local function aux_mission( in_pilot )
 
     -- extra fluff comes here
     -- can't let the player land in a cargo shuttle that wasn't owned by the player
-    player.landAllow ( false, _("The shuttle is only suited for light space travel.") )
-    player.pilot():setNoJump(true)
+    local land_msg = _("The shuttle is only suited for light space travel.") 
+    player.landAllow ( false, land_msg)
+--  player.pilot():setNoJump(true)
 
+    -- cache.joyride created by joyride.swap_to_subship
+    naev.cache().joyride.noland = land_msg
     -- risky?
     player.pilot():hookClear() -- clear player hooks to prevent errors
 

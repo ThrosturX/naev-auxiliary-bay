@@ -15,9 +15,31 @@
 
 -- luacheck: globals CHECK_MOTHERSHIP CHECK_JOYRIDE end_joyride (Hook functions passed by name)
 
-
 local der = require "common.derelict"
 local vntk = require "vntk"
+
+local joyride = require "joyride"
+
+function ENTER_JUMPIN_MOTHERSHIP ()
+    joyride.spawn_mothership()
+    -- make spawn_mothership jump in from this system next time if following player
+    local nc = naev.cache()
+    nc.joyride.pos = system.cur()
+    if nc.joyride.hook then
+        hook.rm(nc.joyride.hook)
+    end
+    nc.joyride.hook = hook.pilot(nc.joyride.pilot, "board", "end_joyride")
+end
+
+local enter_hook = nil
+function ENTER_SCHEDULE_MOTHERSHIP ()
+    -- disallow landing if requested by the user
+    if naev.cache().joyride.noland then
+        player.landAllow( false, tostring(naev.cache().joyride.noland) )
+    end
+    -- gotta jump in the player's ship at some point
+    hook.timer( math.random(6, 20), "ENTER_JUMPIN_MOTHERSHIP" )
+end
 
 -- to circumvent hook.safe bug
 local last_ship = nil
@@ -26,6 +48,9 @@ function CHECK_MOTHERSHIP ( ref_name )
     local nc = naev.cache()
     if nc.player_mothership == ref_name then
         nc.joyride.hook = hook.pilot(nc.joyride.pilot, "board", "end_joyride")
+        -- make spawn_mothership jump in from this system if following player
+        naev.cache().joyride.pos = system.cur()
+        enter_hook = hook.enter( "ENTER_SCHEDULE_MOTHERSHIP" )
     end
 end
 
@@ -35,7 +60,6 @@ function CHECK_JOYRIDE( new_name, new_type , old_ship )
         -- we actually need to wait one more frame before the mothership is set, so hook it here
         last_ship = old_ship -- monkey patch for hook.safe bug
         hook.safe( "CHECK_MOTHERSHIP", old_ship)
-
     end
 end
 
@@ -83,4 +107,8 @@ function end_joyride()
     naev.cache().joyride = nil
     naev.cache().player_mothership = nil
     last_ship = nil
+    if enter_hook ~= nil then
+        hook.rm(enter_hook)
+        enter_hook = nil
+    end
 end

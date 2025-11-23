@@ -1,6 +1,8 @@
 local der = require "common.derelict"
 
-local function spawn_ghost()
+local module = {}
+
+module.spawn_mothership = function ()
     if
         naev.cache().joyride
     then
@@ -38,8 +40,6 @@ local function spawn_ghost()
         -- hook.pilot(naev.cache().joyride.pilot, "board", "auxiliary_ship_return")
     end
 end
-
-local module = {}
 
 module.swap_to_subship = function ( in_pilot, template, acquired )
     if not acquired then
@@ -96,7 +96,7 @@ module.swap_to_subship = function ( in_pilot, template, acquired )
     template:rm()
     
     -- create the player's ship in space
-    spawn_ghost()
+    module.spawn_mothership()
     naev.cache().joyride.pilot:changeAI( "escort_guardian" )
 
     if reserved_fuel then
