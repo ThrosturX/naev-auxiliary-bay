@@ -2,7 +2,11 @@ local der = require "common.derelict"
 
 local module = {}
 
-module.spawn_mothership = function ()
+module.restore_fighter = function ( new_owner, fighter )
+    
+end
+
+module.spawn_mothership = function ( clone )
     if
         naev.cache().joyride
     then
@@ -13,19 +17,26 @@ module.spawn_mothership = function ()
         local pp = player.pilot()
         local fakefac = faction.dynAdd(pp:faction():name(), naev.cache().joyride.mothership, naev.cache().joyride.mothership, { ai = "escort_guardian", clear_enemies = true})
 
-        naev.cache().joyride.pilot = pilot.add(naev.cache().joyride.ship, fakefac, naev.cache().joyride.pos, naev.cache().joyride.mothership, { naked = true })
-        -- match speed and velocity
-        naev.cache().joyride.pilot:setDir(naev.cache().joyride.dir)
-        naev.cache().joyride.pilot:setVel(naev.cache().joyride.vel)
-        -- and outfits
-        for _j, o in ipairs(naev.cache().joyride.outfits) do
-            naev.cache().joyride.pilot:outfitAdd(o)
-        end
-        -- put the cargo back
-        for k, v in pairs(naev.cache().joyride.cargo) do
-            -- the player took the mission cargo
-            if not v.m then
-                naev.cache().joyride.pilot:cargoAdd( v.name, v.q )
+        -- best case: we have ane exact clone
+        if clone then
+            -- need to set the faction to make sure the board hook works
+            clone:setFaction(fakefac)
+            naev.cache().joyride.pilot = clone
+        else    -- default case: we create a new pilot based on the data we have
+            naev.cache().joyride.pilot = pilot.add(naev.cache().joyride.ship, fakefac, naev.cache().joyride.pos, naev.cache().joyride.mothership, { naked = true })
+            -- match speed and velocity
+            naev.cache().joyride.pilot:setDir(naev.cache().joyride.dir)
+            naev.cache().joyride.pilot:setVel(naev.cache().joyride.vel)
+            -- and outfits
+            for _j, o in ipairs(naev.cache().joyride.outfits) do
+                naev.cache().joyride.pilot:outfitAdd(o)
+            end
+            -- put the cargo back
+            for k, v in pairs(naev.cache().joyride.cargo) do
+                -- the player took the mission cargo
+                if not v.m then
+                    naev.cache().joyride.pilot:cargoAdd( v.name, v.q )
+                end
             end
         end
         naev.cache().joyride.pilot:setVisplayer(true)
@@ -74,13 +85,19 @@ module.swap_to_subship = function ( in_pilot, template, acquired )
 
     in_pilot:hookClear() -- clear player hooks to prevent errors
 
+    local clone = in_pilot:clone()
+
     -- create and swap to the new ship here
     local newship = player.shipAdd(ship_type, ship_name, acquired, true)
     player.shipSwap( newship , false, false)
 
+    in_pilot = player.pilot()
     -- fix the velocity vector and direction
-    in_pilot:setVel(naev.cache().joyride.vel)
-    in_pilot:setDir(naev.cache().joyride.dir)
+    in_pilot:setVel(template:vel())
+    in_pilot:setDir(template:dir())
+    -- fix position if differing
+    in_pilot:setPos(template:pos())
+    in_pilot:setTarget(template:target())
 
     -- perform refit
     in_pilot:setFuel(0)   -- don't start with free fuel
@@ -93,10 +110,14 @@ module.swap_to_subship = function ( in_pilot, template, acquired )
     end
     player.allowSave(false)
     der.sfx.unboard:play()
+    local armour, shield, stress = template:health()
+    local energy = template:energy()
     template:rm()
+    player.pilot():setHealth(armour, shield, stress)
+    player.pilot():setEnergy(energy)
     
     -- create the player's ship in space
-    module.spawn_mothership()
+    module.spawn_mothership( clone )
     naev.cache().joyride.pilot:changeAI( "escort_guardian" )
 
     if reserved_fuel then

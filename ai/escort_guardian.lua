@@ -89,7 +89,8 @@ function idle ()
             ai.hostile(target)
             ai.settarget( target )
             ai.aim(target)
-            ai.shoot()
+            ai.weapset( 1, true )
+            ai.weapset( 2, true )
             if not detected_hostile or ai.dist2(detected_hostile) > ai.dist2(target) then
                 detected_hostile = target
             end

@@ -78,6 +78,8 @@ end
 local function aux_mission( in_pilot )
     -- setup
     local template = pilot.add("Cargo Shuttle", "Trader", player.pilot():pos(), ship_name)
+    template:setVel(in_pilot:vel())
+    template:setDir(in_pilot:dir())
     local ship_name = fmt.f( _("{name}'s Shuttle"), {name = player:ship() } )
     local acquired = fmt.f(_("The shuttle bay of your {mothership}."), { mothership = player:ship() } )
     
@@ -88,7 +90,6 @@ local function aux_mission( in_pilot )
     -- can't let the player land in a cargo shuttle that wasn't owned by the player
     local land_msg = _("The shuttle is only suited for light space travel.") 
     player.landAllow ( false, land_msg)
---  player.pilot():setNoJump(true)
 
     -- cache.joyride created by joyride.swap_to_subship
     naev.cache().joyride.noland = land_msg
@@ -106,7 +107,6 @@ function ontoggle( p, po, on )
     if naev.cache().joyride == nil then
         configure_outfits()
         return aux_mission( p )
-        -- return auxiliary_ship_mission( p )
     end
     po:state("off")
 end
