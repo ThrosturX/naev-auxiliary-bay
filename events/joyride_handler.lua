@@ -13,10 +13,7 @@
    Allows the player to fly joyride other ships
 --]]
 
--- luacheck: globals CHECK_MOTHERSHIP CHECK_JOYRIDE end_joyride (Hook functions passed by name)
-
-local der = require "common.derelict"
-local vntk = require "vntk"
+-- luacheck: globals CHECK_MOTHERSHIP CHECK_JOYRIDE CHECK_LANDED_SHIP_SWAP end_joyride joyride_land joyride_takeoff joyride_ship_bought joyride_ship_sold (Hook functions passed by name)
 
 local joyride = require "joyride"
 
@@ -50,8 +47,8 @@ function ENTER_SCHEDULE_MOTHERSHIP ()
 end
 
 
-local joyride_ship
-local last_ship = nil -- to circumvent hook.safe bug
+local last_ship = nil -- to circumvent hook.safe argument bug
+local last_landed_swap = nil
 function CHECK_MOTHERSHIP ( ref_name )
     if not ref_name then ref_name = last_ship end
     local nc = naev.cache()
@@ -60,16 +57,29 @@ function CHECK_MOTHERSHIP ( ref_name )
         -- make spawn_mothership jump in from this system if following player
         naev.cache().joyride.pos = system.cur()
         enter_hook = hook.enter( "ENTER_SCHEDULE_MOTHERSHIP" )
-        joyride_ship = player.pilot():ship():nameRaw()
     end
 end
 
 function CHECK_JOYRIDE( new_name, new_type , old_ship )
+    last_landed_swap = {
+        new_name = new_name,
+        old_name = old_ship,
+    }
+    hook.safe( "CHECK_LANDED_SHIP_SWAP" )
     local nc = naev.cache()
     if nc.joyride and not nc.joyride.hook then
         -- we actually need to wait one more frame before the mothership is set, so hook it here
         last_ship = old_ship -- monkey patch for hook.safe bug
         hook.safe( "CHECK_MOTHERSHIP", old_ship)
+    end
+end
+
+function CHECK_LANDED_SHIP_SWAP()
+    local swap = last_landed_swap
+    last_landed_swap = nil
+    if not swap then return end
+    if joyride.guard_landed_ship_swap( swap.new_name, swap.old_name ) then
+        player.msg( _("You can inspect and refit your other ships here, but must take off in the ship that landed.") )
     end
 end
 
@@ -122,62 +132,48 @@ end
 
 function create()
     hook.ship_swap( "CHECK_JOYRIDE" )
+    hook.ship_buy( "joyride_ship_bought" )
+    hook.ship_sell( "joyride_ship_sold" )
+    hook.land( "joyride_land" )
+    hook.takeoff( "joyride_takeoff" )
     hook.info("FIGHTER_REMOTE_CENTROL")
 end
 
+function joyride_ship_bought( ship_type, traded )
+    joyride.ship_bought( ship_type, traded )
+end
+
+function joyride_ship_sold( ship_type, name )
+    if joyride.restore_sold_mothership( ship_type, name ) then
+        player.msg( _("The mothership is your remote base and cannot be sold during a sortie.") )
+    end
+end
+
+function joyride_land()
+    joyride.land()
+end
+
+function joyride_takeoff()
+    if not joyride.takeoff() then return end
+    local state = naev.cache().joyride
+    if state and state.pilot then
+        state.hook = hook.pilot( state.pilot, "board", "end_joyride" )
+    end
+end
+
 function end_joyride()
-    if not naev.cache().joyride then
-        print("Warning: ending joyride without a joyride vessel")
-        return
-    end
-    if naev.cache().joyride.pilot and naev.cache().joyride.pilot:exists() then
-        -- make sure we are in the shuttle (we reserve this variable when we are out of the mothership)
-        if player.pilot():ship() ~= ship.get(joyride_ship) then
-            vntk.msg( _("Docking Error"), _("The ship you are in doesn't appear to have the necessary adjustments to fit inside the docking bay. Whatever you've done with the ship you left with, you'd better bring it back if you want to get back on your ship."))
-            -- player doesn't get to return
-            player.commClose()
-            return false -- pun not intended
-        end
-        player.pilot():hookClear() -- clear player hooks to prevent errors
-
-        -- we are redocking, save the current outfit layout
-        shuttle_outfits = {}
-        for j, o in ipairs(player.pilot():outfitsList()) do
-            shuttle_outfits[#shuttle_outfits + 1] = o:nameRaw()
-        end
-        local carried_fuel = player.pilot():stats().fuel
-        -- the player goes back into the captain's seat
-        -- bringing any cargo along
-        player.shipSwap(naev.cache().joyride.mothership, false, true)
-        -- copy the vector
-        player.pilot():setPos(naev.cache().joyride.pilot:pos())
-        player.pilot():setDir(naev.cache().joyride.pilot:dir())
-        player.pilot():setVel(naev.cache().joyride.pilot:vel())
-        player.pilot():setFuel(player.pilot():stats().fuel + carried_fuel)
-
-        -- put the cargo back
-        local cl = naev.cache().joyride.pilot:cargoList()
-        -- goes back into the player
-        for k,v in pairs( cl ) do
-            naev.cache().joyride.pilot:cargoRm( v.name, v.q )
-            player.pilot():cargoAdd( v.name, v.q )
-        end
-        naev.cache().joyride.pilot:rm()
-        player.allowSave(true)
-        der.sfx.board:play()
-        player.landAllow ( true )
-    end
-    naev.cache().joyride = nil
-    naev.cache().player_mothership = nil
+    player.unboard()
+    if not joyride.end_joyride() then return false end
     last_ship = nil
-    if enter_hook ~= nil then
+    if enter_hook then
         hook.rm(enter_hook)
         enter_hook = nil
     end
-    if update_hook ~= nil then
+    if update_hook then
         hook.rm(update_hook)
         update_hook = nil
     end
+    return true
 end
 
 function FIGHTER_ATTACKED( _arg1, _arg2, _arg3 )

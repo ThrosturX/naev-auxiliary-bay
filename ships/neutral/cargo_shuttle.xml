@@ -1,9 +1,9 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <ship name="Cargo Shuttle">
  <points>10</points>
- <base_type>Cargo Shuttle</base_type>
- <gfx size="40">cargo_shuttle</gfx>
- <sound>engine</sound>
+ <base_type path="Alpaca">Cargo Shuttle</base_type>
+ <gfx size="40">alpaca.gltf</gfx>
+ <sound>engine_melendez</sound>
  <class display="Auxiliary Ship">Yacht</class>
  <price>48000</price>
  <time_mod>0.85</time_mod>

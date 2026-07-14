@@ -44,7 +44,8 @@ function idle ()
 
    local hostiles = pp:getEnemies(mem.guarddodist, me:pos(), true, false, false)
    local detected_hostile = nil
-   local can_send = rnd.rnd(1, #subordinates * 2) == #subordinates
+   local can_send = #subordinates > 0
+      and rnd.rnd(1, #subordinates * 2) == #subordinates
 
    for _, enemy in ipairs(hostiles) do
       if should_attack(enemy) then

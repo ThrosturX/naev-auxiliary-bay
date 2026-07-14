@@ -77,17 +77,17 @@ end
 -- NOTE:  in_pilot must be the player
 local function aux_mission( in_pilot )
     -- setup
-    local template = pilot.add("Cargo Shuttle", "Trader", player.pilot():pos(), ship_name)
+    local ship_name = fmt.f( _("{name}'s Shuttle"), {name = player:ship() } )
+    local template = pilot.add("Alpaca", "Trader", player.pilot():pos(), ship_name, {ai="dummy"})
     template:setVel(in_pilot:vel())
     template:setDir(in_pilot:dir())
-    local ship_name = fmt.f( _("{name}'s Shuttle"), {name = player:ship() } )
     local acquired = fmt.f(_("The shuttle bay of your {mothership}."), { mothership = player:ship() } )
     
     -- main heavy lifter
     local pp = joyride.swap_to_subship( in_pilot, template, acquired )
 
     -- extra fluff comes here
-    -- can't let the player land in a cargo shuttle that wasn't owned by the player
+    -- The temporary Alpaca is carried by the mothership, not owned separately.
     local land_msg = _("The shuttle is only suited for light space travel.") 
     player.landAllow ( false, land_msg)
 
