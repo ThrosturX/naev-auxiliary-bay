@@ -6,176 +6,185 @@ local joyride = {}
 
 local DEFAULT_AI = "escort_guardian"
 local SPAWNED_HOOK = "joyride_mothership_spawned"
+local RETURNING_HOOK = "joyride_returning"
 local ENDED_HOOK = "joyride_ended"
 local SHUTTLE_RETURNED_HOOK = "joyride_shuttle_returned"
+local CONTROLLED_CHANGED_HOOK = "joyride_controlled_ship_changed"
 local MOTHERSHIP_RESTORED_HOOK = "joyride_mothership_restored"
+local session_sequence = 0
 
 local function cache()
    return naev.cache().joyride
-end
-
-local function profile_value(key, fallback)
-   local state = cache()
-   local profile = state and state.profile or nil
-   if profile and profile[key] ~= nil then
-      return profile[key]
-   end
-   return fallback
-end
-
-local function mothership_faction(state)
-   local base = profile_value("faction", player.pilot():faction())
-   local name = profile_value("name", state.mothership)
-   return faction.dynAdd(base, name, name, {
-      ai = profile_value("ai", DEFAULT_AI),
-      clear_enemies = true,
-   })
-end
-
-local function restore_cargo(pilot, cargo)
-   for _, item in ipairs(cargo) do
-      if not item.m then
-         pilot:cargoAdd(item.c, item.q)
-      end
-   end
 end
 
 local function fail(reason)
    return false, reason
 end
 
+local function profile_value(state, key, fallback)
+   local profile = state and state.profile or nil
+   if profile and profile[key] ~= nil then return profile[key] end
+   return fallback
+end
+
 local function owned_ship(name)
    for _, entry in ipairs(player.ships()) do
-      if entry.name == name then
-         return entry
-      end
+      if entry.name == name then return entry end
    end
 end
 
-local function has_mission_cargo(pilot)
-   for _, item in ipairs(pilot:cargoList()) do
-      if item.m and item.q > 0 then
-         return true
-      end
+local function cargo_quantity(subject)
+   local quantity = 0
+   for _, item in ipairs(subject:cargoList()) do
+      if item.q > 0 then quantity = quantity + item.q end
+   end
+   return quantity
+end
+
+local function has_cargo(subject)
+   return cargo_quantity(subject) > 0
+end
+
+local function has_mission_cargo(subject)
+   for _, item in ipairs(subject:cargoList()) do
+      if item.m and item.q > 0 then return true end
    end
    return false
 end
 
-local function has_cargo(pilot)
-   for _, item in ipairs(pilot:cargoList()) do
-      if item.q > 0 then
-         return true
+local function regular_cargo(subject)
+   local result = {}
+   for _, item in ipairs(subject:cargoList()) do
+      if not item.m and item.q > 0 then
+         result[#result + 1] = { commodity = item.c, quantity = item.q }
       end
    end
-   return false
+   return result
 end
 
-local function outfit_names(pilot)
-   local outfits = {}
-   for _, outfit in ipairs(pilot:outfitsList()) do
-      outfits[#outfits + 1] = outfit:nameRaw()
+local function remove_regular_cargo(subject, cargo)
+   for _, item in ipairs(cargo) do
+      subject:cargoRm(item.commodity, item.quantity)
    end
-   return outfits
 end
 
-local function hull_name(pilot)
-   return pilot:ship():nameRaw()
+local function add_regular_cargo(subject, cargo)
+   for _, item in ipairs(cargo or {}) do
+      subject:cargoAdd(item.commodity, item.quantity)
+   end
 end
 
-local function validate_profile(flag)
+local function outfit_names(subject)
+   local result = {}
+   for _, installed in ipairs(subject:outfitsList()) do
+      result[#result + 1] = installed:nameRaw()
+   end
+   return result
+end
+
+local function snapshot_mothership(subject, profile)
+   local armour, shield, stress = subject:health()
+   return {
+      mothership = player.ship(),
+      ship = subject:ship(),
+      pos = subject:pos(),
+      dir = subject:dir(),
+      vel = subject:vel(),
+      outfits = subject:outfitsList(),
+      cargo = regular_cargo(subject),
+      mothership_acquired = player.shipMetadata().acquired,
+      armour = armour,
+      shield = shield,
+      stress = stress,
+      energy = subject:energy(),
+      fuel = subject:stats().fuel,
+      profile = profile or {},
+      faction = subject:faction(),
+   }
+end
+
+local function mothership_faction(state)
+   if state.mothership_faction then return state.mothership_faction end
+   local base = profile_value(state, "faction", state.faction)
+   local name = profile_value(state, "name", state.mothership)
+   state.mothership_faction = faction.dynAdd(base, name, name, {
+      ai = profile_value(state, "ai", DEFAULT_AI),
+      clear_enemies = true,
+   })
+   return state.mothership_faction
+end
+
+local function configure_mothership(state, subject)
+   subject:setVisplayer(true)
+   subject:setNoClear(true)
+   subject:setNoLand(true)
+   subject:setNoJump(true)
+   subject:setActiveBoard(true)
+   subject:setHilight(true)
+   subject:setFriendly(true)
+   subject:setInvincPlayer(true)
+   state.pilot = subject
+   naev.trigger(SPAWNED_HOOK, {
+      client = profile_value(state, "client", "joyride"),
+      pilot = subject,
+   })
+   return subject
+end
+
+function joyride.spawn_mothership()
    local state = cache()
-   if not state then
-      return nil, "no Joyride session is active"
-   end
-   if not state.profile[flag] then
-      return nil, "the active Joyride profile does not allow this operation"
-   end
-   return state
-end
-
-function joyride.spawn_mothership(clone)
-   local state = cache()
-   if not state then
-      return nil
-   end
-   if not clone and state.pilot and state.pilot:exists() then
-      return state.pilot
-   end
-
+   if not state then return nil end
+   if state.pilot and state.pilot:exists() then return state.pilot end
    if state.hook then
       hook.rm(state.hook)
       state.hook = nil
    end
 
-   local ai_name = profile_value("ai", DEFAULT_AI)
-   local pilot_name = profile_value("name", state.mothership)
-   local fakefac = mothership_faction(state)
-   local mothership
-
-   if clone then
-      mothership = clone
-      mothership:setFaction(fakefac)
-      mothership:rename(pilot_name)
-      restore_cargo(mothership, state.cargo)
-   else
-      mothership = pilot.add(state.ship, fakefac, state.pos, pilot_name, {
-         ai = ai_name,
-         naked = true,
-      })
-      mothership:setDir(state.dir)
-      mothership:setVel(state.vel)
-      for _, outfit in ipairs(state.outfits) do
-         mothership:outfitAdd(outfit)
-      end
-      restore_cargo(mothership, state.cargo)
+   local name = profile_value(state, "name", state.mothership)
+   local ai_name = profile_value(state, "ai", DEFAULT_AI)
+   local mothership = pilot.add(state.ship, mothership_faction(state), state.pos,
+      name, { ai = ai_name, naked = true })
+   mothership:setDir(state.dir)
+   mothership:setVel(state.vel)
+   for _, installed in ipairs(state.outfits) do
+      mothership:outfitAdd(installed)
    end
+   add_regular_cargo(mothership, state.cargo)
+   if state.armour then
+      mothership:setHealth(state.armour, state.shield, state.stress)
+      mothership:setEnergy(state.energy)
+      mothership:setFuel(state.fuel)
+   end
+   return configure_mothership(state, mothership)
+end
 
-   mothership:setVisplayer(true)
-   mothership:setNoClear(true)
-   mothership:setNoLand(true)
-   mothership:setNoJump(true)
-   mothership:setActiveBoard(true)
-   mothership:setHilight(true)
-   mothership:setFriendly(true)
-   mothership:setInvincPlayer(true)
-   state.pilot = mothership
-
-   naev.trigger(SPAWNED_HOOK, {
-      client = profile_value("client", "joyride"),
-      pilot = mothership,
-   })
-   return mothership
+local function begin_session(state)
+   session_sequence = session_sequence + 1
+   state.token = session_sequence
+   naev.cache().joyride = state
+   -- Evo Factions reads these original Joyride cache fields directly. Keep
+   -- their meaning stable without making Evo a dependency of Joyride.
+   naev.cache().player_mothership = state.mothership
+   player.allowSave(false)
+   if state.profile.noland then
+      state.noland = state.profile.noland
+      player.landAllow(false, state.noland)
+   end
 end
 
 function joyride.swap_to_subship(in_pilot, template, acquired, profile)
+   if cache() then return fail("a Joyride session is already active") end
    acquired = acquired or fmt.f(
       _("Belongs in the bay of your {mothership}."),
-      { mothership = in_pilot:ship():name() }
-   )
+      { mothership = in_pilot:ship():name() })
 
-   local ship_type = template:ship()
-   local ship_name = template:name()
-   local state = {
-      mothership = player.ship(),
-      ship = in_pilot:ship(),
-      subship = ship_type,
-      pos = in_pilot:pos(),
-      dir = in_pilot:dir(),
-      vel = in_pilot:vel(),
-      outfits = in_pilot:outfitsList(),
-      cargo = in_pilot:cargoList(),
-      mothership_acquired = player.shipMetadata().acquired,
-      profile = profile or {},
-      kind = "virtual",
-   }
-   naev.cache().joyride = state
+   local state = snapshot_mothership(in_pilot, profile)
+   state.kind = "virtual"
+   state.subship = template:ship()
+   begin_session(state)
 
-   for _, item in ipairs(state.cargo) do
-      if not item.m then
-         in_pilot:cargoRm(item.c, item.q)
-      end
-   end
-
+   remove_regular_cargo(in_pilot, state.cargo)
+   in_pilot:hookClear()
    local desired_fuel = template:stats().fuel_consumption
    local reserved_fuel
    if in_pilot:stats().fuel > desired_fuel + in_pilot:stats().fuel_consumption then
@@ -183,57 +192,164 @@ function joyride.swap_to_subship(in_pilot, template, acquired, profile)
       in_pilot:setFuel(in_pilot:stats().fuel - reserved_fuel)
    end
 
-   in_pilot:hookClear()
-
-   -- pilot:clone() does not copy an AI. Assign one immediately so other
-   -- pilots can safely scan the clone as soon as this callback returns.
-   local clone = in_pilot:clone()
-   clone:changeAI(profile_value("ai", DEFAULT_AI))
-
-   local newship = player.shipAdd(ship_type:nameRaw(), ship_name, acquired, true)
-   state.virtual_name = newship
-   player.shipSwap(newship, false, false)
-   in_pilot = player.pilot()
-   in_pilot:setVel(template:vel())
-   in_pilot:setDir(template:dir())
-   in_pilot:setPos(template:pos())
-   in_pilot:setTarget(template:target())
-   in_pilot:setFuel(0)
-   in_pilot:outfitRm("all")
-   in_pilot:outfitRm("cores")
-   for _, outfit in ipairs(template:outfitsList()) do
-      in_pilot:outfitAdd(outfit, 1, true)
-   end
-
-   player.allowSave(false)
-   der.sfxUnboard()
+   local template_name = template:name()
+   local template_pos, template_vel = template:pos(), template:vel()
+   local template_dir, template_target = template:dir(), template:target()
+   local template_outfits = template:outfitsList()
    local armour, shield, stress = template:health()
    local energy = template:energy()
    template:rm()
-   in_pilot:setHealth(armour, shield, stress)
-   in_pilot:setEnergy(energy)
 
-   joyride.spawn_mothership(clone)
-   if state.profile.noland then
-      state.noland = state.profile.noland
-      player.landAllow(false, state.noland)
+   state.virtual_name = player.shipAdd(state.subship:nameRaw(), template_name,
+      acquired, true)
+   player.shipSwap(state.virtual_name, false, false)
+   local controlled = player.pilot()
+   controlled:setVel(template_vel)
+   controlled:setDir(template_dir)
+   controlled:setPos(template_pos)
+   controlled:setTarget(template_target)
+   controlled:setFuel(reserved_fuel or 0)
+   controlled:outfitRm("all")
+   controlled:outfitRm("cores")
+   for _, installed in ipairs(template_outfits) do
+      controlled:outfitAdd(installed, 1, true)
    end
-   if reserved_fuel then
-      in_pilot:setFuel(reserved_fuel)
+   controlled:setHealth(armour, shield, stress)
+   controlled:setEnergy(energy)
+   local called, spawned = pcall(joyride.spawn_mothership)
+   if not called or not spawned then
+      if state.hook then hook.rm(state.hook) end
+      if state.pilot and state.pilot:exists() then state.pilot:rm() end
+      player.shipSwap(state.mothership, false, true)
+      local restored = player.pilot()
+      add_regular_cargo(restored, state.cargo)
+      restored:setHealth(state.armour, state.shield, state.stress)
+      restored:setEnergy(state.energy)
+      restored:setFuel(state.fuel)
+      naev.cache().joyride = nil
+      naev.cache().player_mothership = nil
+      player.allowSave(true)
+      player.landAllow(true)
+      return fail(called and "the mothership could not be spawned" or spawned)
    end
-   naev.cache().player_mothership = state.mothership
-   return in_pilot
+   der.sfxUnboard()
+   return controlled
+end
+
+local function begin_owned_state(state, controlled_name)
+   state.kind = "owned"
+   state.controlled = controlled_name
+   begin_session(state)
+   return true
+end
+
+function joyride.begin_owned_sortie(name, template, profile)
+   if cache() then return fail("a Joyride session is already active") end
+   local destination = owned_ship(name)
+   if not destination then return fail("the assigned owned ship is unavailable") end
+   if destination.deployed then return fail("the assigned owned ship is already deployed") end
+   if name == player.ship() then return fail("the assigned ship is already controlled") end
+   if has_mission_cargo(player.pilot()) then
+      return fail("mission cargo prevents changing seats")
+   end
+   if not template or not template:exists() then
+      return fail("the launched ship is unavailable")
+   end
+
+   local mothership = player.pilot()
+   local state = snapshot_mothership(mothership, profile)
+   remove_regular_cargo(mothership, state.cargo)
+   mothership:hookClear()
+
+   local pos, dir, vel = template:pos(), template:dir(), template:vel()
+   local armour, shield, stress = template:health()
+   local energy, fuel = template:energy(), template:stats().fuel
+   local carried_cargo = regular_cargo(template)
+   template:rm()
+   begin_owned_state(state, name)
+   player.shipSwap(name, true, false)
+   local controlled = player.pilot()
+   controlled:setPos(pos)
+   controlled:setDir(dir)
+   controlled:setVel(vel)
+   controlled:setHealth(armour, shield, stress)
+   controlled:setEnergy(energy)
+   controlled:setFuel(fuel)
+   controlled:cargoRm("all")
+   add_regular_cargo(controlled, carried_cargo)
+   local called, spawned = pcall(joyride.spawn_mothership)
+   if not called or not spawned then
+      if state.hook then hook.rm(state.hook) end
+      if state.pilot and state.pilot:exists() then state.pilot:rm() end
+      player.shipSwap(state.mothership, true, false)
+      add_regular_cargo(player.pilot(), state.cargo)
+      naev.cache().joyride = nil
+      naev.cache().player_mothership = nil
+      player.allowSave(true)
+      player.landAllow(true)
+      return fail(called and "the mothership could not be spawned" or spawned)
+   end
+   der.sfxUnboard()
+   return controlled
+end
+
+function joyride.begin_stored_owned_sortie(mothership_name, profile, position,
+      direction)
+   if cache() then return fail("a Joyride session is already active") end
+   local mothership = owned_ship(mothership_name)
+   if not mothership then return fail("the stored mothership is not owned") end
+   if player.ship() == mothership_name then
+      return fail("select a stored craft before beginning its sortie")
+   end
+   if not position then return fail("the stored mothership position is required") end
+
+   local state = {
+      mothership = mothership_name,
+      ship = mothership.ship,
+      pos = position,
+      dir = direction or 0,
+      vel = vec2.new(0, 0),
+      outfits = player.shipOutfits(mothership_name) or {},
+      cargo = {},
+      mothership_acquired = (player.shipMetadata(mothership_name) or {}).acquired,
+      profile = profile or {},
+      faction = player.pilot():faction(),
+   }
+   begin_owned_state(state, player.ship())
+   local called, spawned = pcall(joyride.spawn_mothership)
+   if not called or not spawned then
+      if state.hook then hook.rm(state.hook) end
+      if state.pilot and state.pilot:exists() then state.pilot:rm() end
+      naev.cache().joyride = nil
+      naev.cache().player_mothership = nil
+      player.allowSave(true)
+      player.landAllow(true)
+      return fail(called and "the stored mothership could not be spawned"
+         or spawned)
+   end
+   return true
+end
+
+local function validate_landable()
+   local state = cache()
+   if not state then return nil, "no Joyride session is active" end
+   if not state.profile.landable then
+      return nil, "the active Joyride profile does not allow landing"
+   end
+   return state
 end
 
 function joyride.land()
-   local state, reason = validate_profile("landable")
-   if not state then
-      return fail(reason)
-   end
+   local state, reason = validate_landable()
+   if not state then return fail(reason) end
    if state.pilot and state.pilot:exists() then
-      state.pos = state.pilot:pos()
-      state.dir = state.pilot:dir()
-      state.vel = state.pilot:vel()
+      state.pos, state.dir, state.vel = state.pilot:pos(),
+         state.pilot:dir(), state.pilot:vel()
+      state.cargo = regular_cargo(state.pilot)
+      state.outfits = state.pilot:outfitsList()
+      state.armour, state.shield, state.stress = state.pilot:health()
+      state.energy = state.pilot:energy()
+      state.fuel = state.pilot:stats().fuel
       state.pilot:rm()
    end
    state.pilot = nil
@@ -242,76 +358,90 @@ function joyride.land()
 end
 
 function joyride.takeoff()
-   local state, reason = validate_profile("landable")
-   if not state then
-      return fail(reason)
-   end
+   local state, reason = validate_landable()
+   if not state then return fail(reason) end
    player.allowSave(false)
-   joyride.spawn_mothership()
-   return true
+   return joyride.spawn_mothership() ~= nil
 end
 
-function joyride.guard_landed_ship_swap(new_name, old_name)
+function joyride.landed_ship_swap(new_name)
    local state = cache()
-   if not state or not state.profile.landed_ship_lock
-      or state.pilot ~= nil or old_name == nil then
-      return false
+   if not state or not state.profile.landable or state.pilot
+      or state.internal_swap or not player.isLanded() then return false end
+   if player.ship() ~= new_name then return false end
+   if new_name == state.mothership then
+      local client = profile_value(state, "client", "joyride")
+      local returned_kind = state.kind
+      local returned_name = state.kind == "owned" and state.controlled or nil
+      local virtual_name = state.virtual_name
+      naev.cache().joyride = nil
+      naev.cache().player_mothership = nil
+      player.allowSave(true)
+      player.landAllow(true)
+      if virtual_name and virtual_name ~= new_name and owned_ship(virtual_name) then
+         player.shipRm(virtual_name)
+      end
+      naev.trigger(ENDED_HOOK, {
+         client = client,
+         returned_kind = returned_kind,
+         returned_name = returned_name,
+         landed = true,
+      })
+      return true
    end
 
-   local ignored = state.ignored_landed_swap
-   if ignored and ignored.new_name == new_name
-      and ignored.old_name == old_name then
-      state.ignored_landed_swap = nil
-      return false
+   local client = profile_value(state, "client", "joyride")
+   local previous = state.kind == "owned" and state.controlled
+      or state.virtual_name
+   if state.kind == "virtual" then
+      local virtual_name = state.virtual_name
+      state.kind = "owned"
+      state.virtual_name = nil
+      if virtual_name and virtual_name ~= new_name and owned_ship(virtual_name) then
+         player.shipRm(virtual_name)
+      end
+      naev.trigger(SHUTTLE_RETURNED_HOOK, {
+         client = client,
+         returned_kind = "virtual",
+      })
    end
-   if player.ship() ~= new_name or not owned_ship(old_name) then
-      return false
-   end
-
-   -- Naev exposes ship_swap only after the equipment screen has changed ships.
-   -- The handler defers this check so a Trade or Joyride handoff can remove the
-   -- old ship first. If it still exists, this was only an equipment-screen
-   -- inspection and the craft that actually landed must remain controlled.
-   state.ignored_landed_swap = {
-      new_name = old_name,
-      old_name = new_name,
-   }
-   player.shipSwap(old_name, false, false)
+   state.controlled = new_name
+   naev.trigger(CONTROLLED_CHANGED_HOOK, {
+      client = client,
+      previous = previous,
+      controlled = new_name,
+   })
    return true
 end
 
 function joyride.restore_sold_mothership(ship_type, name)
    local state = cache()
-   if not state or not state.profile.protect_mothership_sale
-      or state.pilot ~= nil or name ~= state.mothership then
-      return false
-   end
-
+   if not state or state.pilot or not state.profile.landable
+      or name ~= state.mothership then return false end
    local controlled = player.ship()
    player.shipAdd(ship_type:nameRaw(), name, state.mothership_acquired, true)
+   state.internal_swap = true
    player.shipSwap(name, true, false)
-   player.pilot():outfitRm("all")
-   player.pilot():outfitRm("cores")
-   for _, outfit in ipairs(state.outfits) do
-      player.pilot():outfitAdd(outfit, 1, true)
+   local restored = player.pilot()
+   restored:outfitRm("all")
+   restored:outfitRm("cores")
+   for _, installed in ipairs(state.outfits) do
+      restored:outfitAdd(installed, 1, true)
    end
-   player.pay(-player.pilot():worth())
+   player.pay(-restored:worth())
+   player.shipSwap(controlled, true, false)
+   state.internal_swap = nil
    naev.trigger(MOTHERSHIP_RESTORED_HOOK, {
-      client = profile_value("client", "joyride"),
+      client = profile_value(state, "client", "joyride"),
       name = name,
    })
-   state.ignored_landed_swap = {
-      new_name = controlled,
-      old_name = name,
-   }
-   player.shipSwap(controlled, true, false)
    return true
 end
 
 function joyride.ship_bought(ship_type, traded)
-   local state, reason = validate_profile("trade_replacement")
-   if not state then
-      return fail(reason)
+   local state = cache()
+   if not state or not state.profile.trade_replacement then
+      return fail("the active Joyride profile does not allow replacement")
    end
    if not traded or state.kind ~= "virtual" then
       return fail("the purchase did not replace the virtual shuttle")
@@ -322,33 +452,29 @@ function joyride.ship_bought(ship_type, traded)
 end
 
 function joyride.handoff_to_owned(name)
-   local state, reason = validate_profile("owned_handoff")
-   if not state then
-      return fail(reason)
+   local state = cache()
+   if not state or not state.profile.owned_handoff then
+      return fail("the active Joyride profile does not allow this handoff")
    end
    if state.kind ~= "virtual" or player.ship() ~= state.virtual_name then
       return fail("the virtual shuttle is not currently controlled")
    end
    local destination = owned_ship(name)
-   if not destination then
-      return fail("the requested ship is not owned")
-   end
-   if destination.deployed then
-      return fail("the requested ship is deployed")
-   end
-   if has_cargo(player.pilot()) then
-      return fail("the virtual shuttle must be empty")
-   end
+   if not destination then return fail("the requested ship is not owned") end
+   if destination.deployed then return fail("the requested ship is deployed") end
+   if has_cargo(player.pilot()) then return fail("the virtual shuttle must be empty") end
 
-   local client = profile_value("client", "joyride")
+   local client = profile_value(state, "client", "joyride")
    naev.trigger(SHUTTLE_RETURNED_HOOK, {
       client = client,
       returned_kind = "virtual",
-      hull = hull_name(player.pilot()),
+      hull = player.pilot():ship():nameRaw(),
       outfits = outfit_names(player.pilot()),
    })
    local virtual_name = state.virtual_name
+   state.internal_swap = true
    player.shipSwap(name, true, false)
+   state.internal_swap = nil
    player.shipRm(virtual_name)
    state.kind = "owned"
    state.controlled = name
@@ -356,185 +482,69 @@ function joyride.handoff_to_owned(name)
    return true
 end
 
-function joyride.launch_owned(name)
-   local state, reason = validate_profile("owned_escorts")
-   if not state then
-      return fail(reason)
-   end
-   local entry = owned_ship(name)
-   if not entry then
-      return fail("the requested ship is not owned")
-   end
-   if name == state.mothership or name == state.virtual_name
-      or name == player.ship() then
-      return fail("the requested ship cannot be deployed")
-   end
-   if entry.deployed then
-      return fail("the requested ship is already deployed")
-   end
-   player.shipDeploy(name, true, true)
-   return true
-end
-
-function joyride.recall_owned(name)
-   local state, reason = validate_profile("owned_escorts")
-   if not state then
-      return fail(reason)
-   end
-   local entry = owned_ship(name)
-   if not entry then
-      return fail("the requested ship is not owned")
-   end
-   if name == state.mothership or name == state.virtual_name then
-      return fail("the requested ship cannot be recalled")
-   end
-   if not entry.deployed then
-      return fail("the requested ship is not deployed")
-   end
-   player.shipDeploy(name, false, false)
-   return true
-end
-
-function joyride.borrow_owned(name, profile)
-   local state = cache()
-   if not state then
-      if not profile or not profile.owned_escorts then
-         return fail("the requested Joyride profile does not allow owned escorts")
-      end
-      local destination = owned_ship(name)
-      if not destination then
-         return fail("the requested ship is not owned")
-      end
-      if not destination.deployed then
-         return fail("the requested ship is not deployed")
-      end
-      if name == player.ship() then
-         return fail("the currently controlled ship cannot be borrowed")
-      end
-      if has_mission_cargo(player.pilot()) then
-         return fail("mission cargo prevents changing ships")
-      end
-
-      local mothership = player.pilot()
-      state = {
-         mothership = player.ship(),
-         ship = mothership:ship(),
-         pos = mothership:pos(),
-         dir = mothership:dir(),
-         vel = mothership:vel(),
-         outfits = mothership:outfitsList(),
-         cargo = mothership:cargoList(),
-         mothership_acquired = player.shipMetadata().acquired,
-         profile = profile,
-         kind = "owned",
-         controlled = name,
-      }
-      naev.cache().joyride = state
-      naev.cache().player_mothership = state.mothership
-
-      for _, item in ipairs(state.cargo) do
-         if not item.m then
-            mothership:cargoRm(item.c, item.q)
-         end
-      end
-      mothership:hookClear()
-      local clone = mothership:clone()
-      clone:changeAI(profile.ai or DEFAULT_AI)
-
-      player.shipDeploy(name, false, false)
-      player.shipSwap(name, true, false)
-      player.allowSave(false)
-      joyride.spawn_mothership(clone)
-      return true
-   end
-
-   local reason
-   state, reason = validate_profile("owned_escorts")
-   if not state then return fail(reason) end
-   if state.kind ~= "owned" then
-      return fail("an owned ship must be controlled before changing seats")
-   end
-   if player.ship() ~= state.controlled then
-      return fail("the active owned ship does not match the Joyride session")
-   end
-   local destination = owned_ship(name)
-   if not destination then
-      return fail("the requested ship is not owned")
-   end
-   if not destination.deployed then
-      return fail("the requested ship is not deployed")
-   end
-   if name == state.mothership then
-      return fail("use end_joyride to return to the mothership")
-   end
-   if has_mission_cargo(player.pilot()) then
-      return fail("mission cargo prevents changing ships")
-   end
-
-   local previous = player.ship()
-   player.shipDeploy(name, false, false)
-   player.shipSwap(name, true, false)
-   player.shipDeploy(previous, true, true)
-   state.controlled = name
-   return true
-end
-
 function joyride.end_joyride(options)
    options = options or {}
    local state = cache()
-   if not state then
-      return fail("no Joyride session is active")
-   end
+   if not state then return fail("no Joyride session is active") end
    if not state.pilot or not state.pilot:exists() then
       return fail("the mothership is not available")
    end
    if state.kind == "virtual" and player.pilot():ship() ~= state.subship then
-      vntk.msg(
-         _("Docking Error"),
-         _("The ship you are in does not fit in the auxiliary bay. Return with the ship you launched before trying to dock.")
-      )
+      vntk.msg(_("Docking Error"), _(
+         "The ship you are in does not fit in the auxiliary bay. Return with the ship you launched before trying to dock."))
       player.commClose()
       return fail("the controlled ship is not the virtual shuttle")
-   end
-
-   if state.kind == "virtual" and state.profile.landable
-      and has_cargo(player.pilot()) then
-      return fail("the virtual shuttle must be empty")
-   end
-   if state.kind == "owned" and has_mission_cargo(player.pilot()) then
-      return fail("mission cargo prevents returning to the mothership")
    end
    if state.kind == "owned" and player.ship() ~= state.controlled then
       return fail("the active owned ship does not match the Joyride session")
    end
 
-   player.pilot():hookClear()
+   local seat_transfer = options.seat_transfer == true
+   if seat_transfer and has_cargo(player.pilot()) then
+      return fail("unload this craft before changing seats")
+   end
+   if not seat_transfer and cargo_quantity(player.pilot()) > state.pilot:cargoFree() then
+      return fail("the mothership does not have enough free cargo space")
+   end
+
    local returned_kind = state.kind
    local returned_name = state.kind == "owned" and state.controlled or nil
-   local returned_hull = hull_name(player.pilot())
+   local returned_hull = player.pilot():ship():nameRaw()
    local returned_outfits = outfit_names(player.pilot())
    local carried_fuel = state.kind == "virtual" and player.pilot():stats().fuel or 0
+   local client = profile_value(state, "client", "joyride")
+   local returned_armour, returned_shield, returned_stress =
+      player.pilot():health()
+   local returned_armour_max = player.pilot():stats().armour
 
-   player.shipSwap(state.mothership, state.kind == "owned", state.kind == "virtual")
-   player.pilot():setPos(state.pilot:pos())
-   player.pilot():setDir(state.pilot:dir())
-   player.pilot():setVel(state.pilot:vel())
-   player.pilot():setFuel(player.pilot():stats().fuel + carried_fuel)
-   for _, item in ipairs(state.pilot:cargoList()) do
-      state.pilot:cargoRm(item.c, item.q)
-      player.pilot():cargoAdd(item.c, item.q)
+   local return_pos, return_dir, return_vel = state.pilot:pos(),
+      state.pilot:dir(), state.pilot:vel()
+   local mothership_cargo = regular_cargo(state.pilot)
+   naev.trigger(RETURNING_HOOK, {
+      client = client,
+      returned_kind = returned_kind,
+      returned_name = returned_name,
+      seat_transfer = seat_transfer,
+      armour = returned_armour,
+      shield = returned_shield,
+      stress = returned_stress,
+      armour_max = returned_armour_max,
+   })
+   player.pilot():hookClear()
+   if state.hook then
+      hook.rm(state.hook)
+      state.hook = nil
    end
    state.pilot:rm()
+   state.pilot = nil
+   player.shipSwap(state.mothership, seat_transfer, state.kind == "virtual")
+   local player_pilot = player.pilot()
+   player_pilot:setPos(return_pos)
+   player_pilot:setDir(return_dir)
+   player_pilot:setVel(return_vel)
+   player_pilot:setFuel(player_pilot:stats().fuel + carried_fuel)
+   add_regular_cargo(player_pilot, mothership_cargo)
 
-   -- Some clients use mothership hail as a seat transfer rather than a recall.
-   -- Restore the owned craft as a vanilla escort after control returns to the
-   -- mothership. Virtual shuttles are still consumed by the bay as usual.
-   local redeployed = returned_name and options.redeploy_owned == true
-   if redeployed then
-      player.shipDeploy(returned_name, true, true)
-   end
-
-   local client = profile_value("client", "joyride")
    player.allowSave(true)
    player.landAllow(true)
    der.sfxBoard()
@@ -543,7 +553,8 @@ function joyride.end_joyride(options)
    naev.trigger(ENDED_HOOK, {
       client = client,
       returned_kind = returned_kind,
-      redeployed = redeployed == true,
+      returned_name = returned_name,
+      seat_transfer = seat_transfer,
       hull = returned_hull,
       outfits = returned_outfits,
    })

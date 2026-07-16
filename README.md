@@ -11,13 +11,6 @@ Board your ship again to return the Alpaca to the bay.
 
 The Alpaca is automatically outfitted with potentially useful outfits such as a pulse scanner (if available), mining drills, cargo pods and a fake transponder (if deemed necessary).
 
-## Client integration
-
-`joyride.end_joyride()` recalls the currently controlled owned ship when it
-returns control to the mothership. Clients implementing a seat-transfer UI can
-instead call `joyride.end_joyride { redeploy_owned = true }`; virtual auxiliary
-ships are unaffected and still return to their bay normally.
-
 ## Za'lek Scanner Drone
 
 This plugin also adds a new outfit, the **Za'lek Scanning Drone Interface**, which can be equipped on the *Alpaca* auxiliary ship. If this outfit is owned by the player and in storage, it will automatically be fitted. This outfit reveals information about the outfits installed on a targetted ship by broadcasting a random outfit. The drone must be ordered to attack the target to initiate scans.
