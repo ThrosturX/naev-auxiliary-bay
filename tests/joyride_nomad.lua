@@ -29,11 +29,19 @@ local carrier_type = ship_type("Hephaestus")
 local scout_type = ship_type("Shark")
 local shuttle_type = ship_type("Alpaca")
 local purchased_type = ship_type("Llama")
+local purchased_outfit = {
+   nameRaw = function() return "Replacement Scanner" end,
+}
+local bioship_skill_outfit = {
+   nameRaw = function() return "Hunter's Instinct" end,
+}
 
 local function make_pilot(hull, label)
    local subject = {
       label = label,
       cargo = {},
+      shipvars = {},
+      weapon_sets = {},
       removed = false,
       capacity = 100,
       ship = function() return hull end,
@@ -48,6 +56,7 @@ local function make_pilot(hull, label)
          return { fuel = 60, fuel_consumption = 10, armour = 100 }
       end,
       outfitsList = function() return {} end,
+      outfits = function() return { [3] = purchased_outfit } end,
       cargoList = function(self)
          local result = {}
          for _, item in ipairs(self.cargo) do
@@ -100,6 +109,23 @@ local function make_pilot(hull, label)
       setFriendly = function() end,
       setInvincPlayer = function() end,
    }
+   subject.shipvarPeek = function(self, name) return self.shipvars[name] end
+   subject.shipvarPush = function(self, name, value)
+      self.shipvars[name] = value
+   end
+   subject.shipvarPop = function(self, name) self.shipvars[name] = nil end
+   subject.weapsetList = function(self, id)
+      local result = {}
+      for _slot_index, slot in ipairs(self.weapon_sets[id] or {}) do
+         result[#result + 1] = slot
+      end
+      return result
+   end
+   subject.weapsetCleanup = function(self) self.weapon_sets = {} end
+   subject.weapsetAdd = function(self, id, slot)
+      self.weapon_sets[id] = self.weapon_sets[id] or {}
+      self.weapon_sets[id][#self.weapon_sets[id] + 1] = slot
+   end
    return subject
 end
 
@@ -109,6 +135,7 @@ local pilots = {
    Purchased = make_pilot(purchased_type, "purchased"),
    Shuttle = make_pilot(shuttle_type, "shuttle"),
 }
+pilots.Purchased.outfitsList = function() return { purchased_outfit } end
 local ships, current_name, current_pilot = {}, "Carrier", pilots.Carrier
 local cache = {}
 local landed = false
@@ -158,7 +185,11 @@ player = {
       return result
    end,
    shipMetadata = function() return { acquired = "Original carrier" } end,
-   shipOutfits = function() return {} end,
+   shipOutfits = function(name)
+      if name == "Purchased" then return { purchased_outfit } end
+      return {}
+   end,
+   shipvarPeek = function(key, name) return pilots[name].shipvars[key] end,
    shipAdd = function(_, name) ships[name] = false; return name end,
    shipRm = function(name) ships[name] = nil; record("remove:" .. name) end,
    shipSwap = function(name, ignore_cargo, remove)
@@ -183,6 +214,8 @@ local joyride = require "joyride"
 local profile = {
    client = "nomad", landable = true,
    trade_replacement = true, owned_handoff = true,
+   persist_virtual_state = true,
+   shipvars = { "bioshipexp", "biostage", "bio_attack1" },
 }
 
 local function reset(name, owned)
@@ -195,6 +228,8 @@ local function reset(name, owned)
          subject.removed = false
          subject.cargo = {}
          subject.capacity = 100
+         subject.shipvars = {}
+         subject.weapon_sets = {}
       end
    end
 end
@@ -296,6 +331,41 @@ local respawned = cache.joyride.pilot
 assert(joyride.takeoff() and cache.joyride.pilot == respawned,
    "duplicate takeoff callbacks must not duplicate the mothership")
 
+-- A landed return reacquires the still-owned virtual shuttle under the
+-- internal-swap guard, capturing changes made after landing before deletion.
+reset("Shuttle", { Carrier = false })
+cache.joyride = {
+   kind = "virtual", mothership = "Carrier", ship = carrier_type,
+   subship = shuttle_type, virtual_name = "Shuttle",
+   pos = "position", dir = 1, vel = "velocity", outfits = {}, cargo = {},
+   profile = profile, pilot = make_pilot(carrier_type, "landed-state-proxy"),
+}
+pilots.Shuttle.shipvars = { bioshipexp = 300, biostage = 2 }
+pilots.Shuttle.weapon_sets = { [1] = { 3 } }
+assert(joyride.land())
+pilots.Shuttle.shipvars = {
+   bioshipexp = 900, biostage = 3, bio_attack1 = true,
+}
+pilots.Shuttle.weapon_sets = { [2] = { 3 } }
+pilots.Shuttle.outfitsList = function(_self, kind)
+   if kind == "intrinsic" or kind == "all" then
+      return { bioship_skill_outfit }
+   end
+   return {}
+end
+landed = true
+player.shipSwap("Carrier", true, false)
+assert(joyride.landed_ship_swap("Carrier"))
+local state_return = triggers[#triggers]
+assert(state_return.payload.virtual_state.shipvars.bioshipexp == 900
+   and state_return.payload.virtual_state.shipvars.biostage == 3
+   and state_return.payload.virtual_state.shipvars.bio_attack1 == true
+   and state_return.payload.virtual_state.outfits.intrinsics[1]
+      == "Hunter's Instinct"
+   and state_return.payload.virtual_state.weapon_sets[2][1] == 3,
+   "landed return must preserve post-landing bioship outfits and weapon sets")
+landed = false
+
 -- Landed equipment swaps are adopted without reversing the user's selection,
 -- and the active mothership is restored if sold through the shipyard UI.
 reset("Scout", { Carrier = false, Purchased = false })
@@ -312,6 +382,26 @@ ships.Carrier = nil
 assert(joyride.restore_sold_mothership(carrier_type, "Carrier")
    and ships.Carrier == false and current_name == "Purchased",
    "selling the active mothership must restore it without changing seats")
+landed = false
+
+-- Selecting the mothership after trading the virtual shuttle is still a
+-- completed return and must report the replacement to its owning client.
+reset("Carrier", { Purchased = false })
+cache.joyride = {
+   kind = "virtual", mothership = "Carrier", ship = carrier_type,
+   subship = purchased_type, virtual_name = "Purchased",
+   profile = profile,
+}
+cache.player_mothership = "Carrier"
+landed = true
+assert(joyride.landed_ship_swap("Carrier"))
+local landed_return = triggers[#triggers]
+assert(landed_return.name == "joyride_ended"
+   and landed_return.payload.returned_kind == "virtual"
+   and landed_return.payload.hull == "Llama"
+   and landed_return.payload.outfits[1] == "Replacement Scanner"
+   and ships.Purchased == nil,
+   "landed return must consume and register a traded virtual replacement")
 landed = false
 
 -- Expired handler timers are harmless after the session has ended.

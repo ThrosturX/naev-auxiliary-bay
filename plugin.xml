@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin name="Auxiliary Ship Bay">
     <author>ThrosturX</author>
-    <version>0.13.1</version>
+    <version>0.13.2</version>
     <compatibility>0\.(13|14)\..*</compatibility>
     <priority>1</priority>
     <description>Adds a new outfit, the Auxiliary Ship Bay, which allows the user to go for a joyride in an Alpaca shuttle.</description>

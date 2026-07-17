@@ -74,10 +74,96 @@ local function add_regular_cargo(subject, cargo)
    end
 end
 
-local function outfit_names(subject)
+local function outfit_names(subject, kind)
    local result = {}
-   for _, installed in ipairs(subject:outfitsList()) do
+   for _outfit_index, installed in ipairs(subject:outfitsList(kind)) do
       result[#result + 1] = installed:nameRaw()
+   end
+   return result
+end
+
+local function snapshot_outfit_state(subject)
+   local result = { slots = {}, intrinsics = {} }
+   for id, installed in pairs(subject:outfits()) do
+      if installed then result.slots[id] = installed:nameRaw() end
+   end
+   for _intrinsic_index, installed in ipairs(
+         subject:outfitsList("intrinsic")) do
+      result.intrinsics[#result.intrinsics + 1] = installed:nameRaw()
+   end
+   return result
+end
+
+local function restore_outfit_state(subject, saved)
+   if not saved then return end
+   local current = subject:outfits()
+   for id, installed in pairs(current) do
+      local expected = saved.slots and saved.slots[id] or nil
+      if installed and installed:nameRaw() ~= expected then
+         subject:outfitRmSlot(id)
+      end
+   end
+   current = subject:outfits()
+   for id, name in pairs(saved.slots or {}) do
+      local installed = current[id]
+      if not installed or installed:nameRaw() ~= name then
+         subject:outfitAddSlot(name, id, true, true)
+      end
+   end
+   subject:outfitRm("intrinsic")
+   for _intrinsic_index, name in ipairs(saved.intrinsics or {}) do
+      subject:outfitAddIntrinsic(name)
+   end
+end
+
+local function snapshot_virtual_state(subject, state)
+   if not subject or not state or state.kind ~= "virtual"
+      or not state.profile.persist_virtual_state then return nil end
+   local snapshot = {
+      hull = subject:ship():nameRaw(),
+      outfits = snapshot_outfit_state(subject),
+      shipvars = {},
+      weapon_sets = {},
+   }
+   for _shipvar_index, name in ipairs(state.profile.shipvars or {}) do
+      local value = subject:shipvarPeek(name)
+      if value ~= nil then snapshot.shipvars[name] = value end
+   end
+   for id = 1, 10 do
+      snapshot.weapon_sets[id] = {}
+      for _slot_index, slot in ipairs(subject:weapsetList(id)) do
+         snapshot.weapon_sets[id][#snapshot.weapon_sets[id] + 1] = slot
+      end
+   end
+   state.virtual_state = snapshot
+   return snapshot
+end
+
+local function restore_virtual_state(subject, snapshot, shipvars)
+   if not subject or not snapshot
+      or snapshot.hull ~= subject:ship():nameRaw() then return end
+   for _shipvar_index, name in ipairs(shipvars or {}) do
+      subject:shipvarPop(name)
+   end
+   for name, value in pairs(snapshot.shipvars or {}) do
+      subject:shipvarPush(name, value)
+   end
+   restore_outfit_state(subject, snapshot.outfits)
+   if not snapshot.weapon_sets then return end
+   subject:weapsetCleanup()
+   local outfits = subject:outfits()
+   for id, slots in ipairs(snapshot.weapon_sets) do
+      for _slot_index, slot in ipairs(slots) do
+         if outfits[slot] then subject:weapsetAdd(id, slot) end
+      end
+   end
+end
+
+local function owned_outfit_names(name)
+   local result = {}
+   for _index, installed in ipairs(player.shipOutfits(name) or {}) do
+      result[#result + 1] = type(installed) == "string"
+         and installed or installed:nameRaw()
    end
    return result
 end
@@ -214,6 +300,8 @@ function joyride.swap_to_subship(in_pilot, template, acquired, profile)
    for _, installed in ipairs(template_outfits) do
       controlled:outfitAdd(installed, 1, true)
    end
+   restore_virtual_state(controlled, state.profile.virtual_state,
+      state.profile.shipvars)
    controlled:setHealth(armour, shield, stress)
    controlled:setEnergy(energy)
    local called, spawned = pcall(joyride.spawn_mothership)
@@ -342,6 +430,7 @@ end
 function joyride.land()
    local state, reason = validate_landable()
    if not state then return fail(reason) end
+   snapshot_virtual_state(player.pilot(), state)
    if state.pilot and state.pilot:exists() then
       state.pos, state.dir, state.vel = state.pilot:pos(),
          state.pilot:dir(), state.pilot:vel()
@@ -374,6 +463,21 @@ function joyride.landed_ship_swap(new_name)
       local returned_kind = state.kind
       local returned_name = state.kind == "owned" and state.controlled or nil
       local virtual_name = state.virtual_name
+      local returned_hull = state.kind == "virtual"
+         and state.subship:nameRaw() or nil
+      local returned_outfits
+      local returned_state
+      if state.kind == "virtual" and virtual_name
+         and state.profile.persist_virtual_state and owned_ship(virtual_name) then
+         state.internal_swap = true
+         player.shipSwap(virtual_name, true, false)
+         returned_outfits = outfit_names(player.pilot(), "all")
+         returned_state = snapshot_virtual_state(player.pilot(), state)
+         player.shipSwap(new_name, true, false)
+         state.internal_swap = nil
+      elseif state.kind == "virtual" and virtual_name then
+         returned_outfits = owned_outfit_names(virtual_name)
+      end
       naev.cache().joyride = nil
       naev.cache().player_mothership = nil
       player.allowSave(true)
@@ -386,6 +490,9 @@ function joyride.landed_ship_swap(new_name)
          returned_kind = returned_kind,
          returned_name = returned_name,
          landed = true,
+         hull = returned_hull,
+         outfits = returned_outfits,
+         virtual_state = returned_state,
       })
       return true
    end
@@ -465,11 +572,13 @@ function joyride.handoff_to_owned(name)
    if has_cargo(player.pilot()) then return fail("the virtual shuttle must be empty") end
 
    local client = profile_value(state, "client", "joyride")
+   local returned_state = snapshot_virtual_state(player.pilot(), state)
    naev.trigger(SHUTTLE_RETURNED_HOOK, {
       client = client,
       returned_kind = "virtual",
       hull = player.pilot():ship():nameRaw(),
       outfits = outfit_names(player.pilot()),
+      virtual_state = returned_state,
    })
    local virtual_name = state.virtual_name
    state.internal_swap = true
@@ -510,7 +619,9 @@ function joyride.end_joyride(options)
    local returned_kind = state.kind
    local returned_name = state.kind == "owned" and state.controlled or nil
    local returned_hull = player.pilot():ship():nameRaw()
-   local returned_outfits = outfit_names(player.pilot())
+   local returned_outfits = outfit_names(player.pilot(),
+      state.profile.persist_virtual_state and "all" or nil)
+   local returned_state = snapshot_virtual_state(player.pilot(), state)
    local carried_fuel = state.kind == "virtual" and player.pilot():stats().fuel or 0
    local client = profile_value(state, "client", "joyride")
    local returned_armour, returned_shield, returned_stress =
@@ -557,6 +668,7 @@ function joyride.end_joyride(options)
       seat_transfer = seat_transfer,
       hull = returned_hull,
       outfits = returned_outfits,
+      virtual_state = returned_state,
    })
    return true
 end

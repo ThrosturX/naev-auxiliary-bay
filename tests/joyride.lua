@@ -24,9 +24,15 @@ local carrier_type = { name = function() return "Hephaestus" end }
 local shuttle_type = { nameRaw = function() return "Alpaca" end }
 local food = { nameRaw = function() return "Food" end }
 local outfit = { nameRaw = function() return "Small Cargo Pod" end }
+local skill_outfit = { nameRaw = function() return "Hunter's Instinct" end }
+local slot_skill_outfit = { nameRaw = function() return "The Bite" end }
 
 local function common_pilot(hull)
-   return {
+   local subject = {
+      shipvars = {},
+      weapon_sets = {},
+      intrinsic_outfits = {},
+      slot_outfits = { [3] = outfit },
       ship = function() return hull end,
       faction = function() return "Player" end,
       pos = function() return "position" end,
@@ -35,7 +41,11 @@ local function common_pilot(hull)
       health = function() return 90, 80, 0 end,
       energy = function() return 70 end,
       stats = function() return { fuel = 60, fuel_consumption = 10 } end,
-      outfitsList = function() return {} end,
+      outfitsList = function(self, kind)
+         if kind == "intrinsic" then return self.intrinsic_outfits end
+         return {}
+      end,
+      outfits = function(self) return self.slot_outfits end,
       cargoList = function() return {} end,
       cargoFree = function() return 100 end,
       cargoAdd = function() end,
@@ -48,7 +58,18 @@ local function common_pilot(hull)
       setHealth = function() end,
       setEnergy = function() end,
       outfitAdd = function() end,
-      outfitRm = function() end,
+      outfitRm = function(self, kind)
+         if kind == "intrinsic" then self.intrinsic_outfits = {} end
+      end,
+      outfitRmSlot = function(self, id) self.slot_outfits[id] = nil end,
+      outfitAddSlot = function(self, name, id)
+         self.slot_outfits[id] = name == "The Bite" and slot_skill_outfit or name
+         return true
+      end,
+      outfitAddIntrinsic = function(self, name)
+         self.intrinsic_outfits[#self.intrinsic_outfits + 1] =
+            name == "Hunter's Instinct" and skill_outfit or name
+      end,
       setFaction = function() end,
       rename = function() end,
       setVisplayer = function() end,
@@ -61,6 +82,24 @@ local function common_pilot(hull)
       setInvincPlayer = function() end,
       exists = function() return true end,
    }
+   subject.shipvarPeek = function(self, name) return self.shipvars[name] end
+   subject.shipvarPush = function(self, name, value)
+      self.shipvars[name] = value
+   end
+   subject.shipvarPop = function(self, name) self.shipvars[name] = nil end
+   subject.weapsetList = function(self, id)
+      local result = {}
+      for _slot_index, slot in ipairs(self.weapon_sets[id] or {}) do
+         result[#result + 1] = slot
+      end
+      return result
+   end
+   subject.weapsetCleanup = function(self) self.weapon_sets = {} end
+   subject.weapsetAdd = function(self, id, slot)
+      self.weapon_sets[id] = self.weapon_sets[id] or {}
+      self.weapon_sets[id][#self.weapon_sets[id] + 1] = slot
+   end
+   return subject
 end
 
 local carrier = common_pilot(carrier_type)
@@ -87,7 +126,10 @@ clone.rm = function() record("mothership-removed") end
 carrier.clone = function() return clone end
 
 local shuttle = common_pilot(shuttle_type)
-shuttle.outfitsList = function() return { outfit } end
+shuttle.outfitsList = function(self, kind)
+   if kind == "intrinsic" then return self.intrinsic_outfits end
+   return { outfit }
+end
 shuttle.setTarget = function() end
 
 local template = common_pilot(shuttle_type)
@@ -97,12 +139,14 @@ template.outfitsList = function() return { outfit } end
 template.rm = function() record("template-removed") end
 
 local shared_cache = {}
+local ended_payload
 local current_name = "QA Carrier"
 local current_pilot = carrier
 naev = {
    cache = function() return shared_cache end,
    trigger = function(name, payload)
       record("trigger:" .. name .. ":" .. payload.client)
+      if name == "joyride_ended" then ended_payload = payload end
    end,
 }
 faction = { dynAdd = function() return "Joyride faction" end }
@@ -133,12 +177,36 @@ end }
 local joyride = require "joyride"
 assert(joyride.swap_to_subship(carrier, template, "QA", {
    client = "TXCrewmates", ai = "escort_guardian",
+   persist_virtual_state = true,
+   shipvars = { "bioshipexp", "biostage", "bio_attack1" },
+   virtual_state = {
+      hull = "Alpaca",
+      outfits = {
+         slots = { [3] = "The Bite" },
+         intrinsics = { "Hunter's Instinct" },
+      },
+      shipvars = { bioshipexp = 300, biostage = 2, bio_attack1 = true },
+      weapon_sets = { [1] = { 3 } },
+   },
 }))
 assert(index_of("template-removed") < index_of("ship-add")
    and index_of("ship-add") < index_of("mothership-added"),
    "the disposable pilot must be removed before its owned replacement exists")
 assert(shared_cache.joyride.pilot == clone,
    "Joyride must reconstruct exactly one mothership pilot")
+assert(shuttle.shipvars.bioshipexp == 300
+   and shuttle.shipvars.biostage == 2
+   and shuttle.shipvars.bio_attack1 == true
+   and shuttle.slot_outfits[3]:nameRaw() == "The Bite"
+   and shuttle.intrinsic_outfits[1]:nameRaw() == "Hunter's Instinct"
+   and shuttle.weapon_sets[1][1] == 3,
+   "virtual launch must restore opted-in outfits, ship variables, and weapon sets")
+
+shuttle.shipvars.bioshipexp = 900
+shuttle.shipvars.biostage = 3
+shuttle.shipvars.bio_attack1 = nil
+shuttle.shipvars.bio_attack2 = true
+shuttle.weapon_sets = { [2] = { 3 } }
 
 calls = {}
 assert(joyride.end_joyride(), "the auxiliary ship must return")
@@ -155,5 +223,11 @@ assert(shared_cache.joyride == nil and shared_cache.player_mothership == nil,
    "return must clear the complete Joyride session")
 assert(index_of("mothership-removed"),
    "return must remove the temporary mothership pilot")
+assert(ended_payload.virtual_state.hull == "Alpaca"
+   and ended_payload.virtual_state.shipvars.bioshipexp == 900
+   and ended_payload.virtual_state.shipvars.biostage == 3
+   and ended_payload.virtual_state.shipvars.bio_attack1 == nil
+   and ended_payload.virtual_state.weapon_sets[2][1] == 3,
+   "virtual return must report the latest opted-in persistent state")
 
 print("ok - Joyride virtual lifecycle")
