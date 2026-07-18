@@ -220,6 +220,7 @@ end
 function joyride.spawn_mothership()
    local state = cache()
    if not state then return nil end
+   if state.follow_mothership == false then return nil end
    if state.pilot and state.pilot:exists() then return state.pilot end
    if state.hook then
       hook.rm(state.hook)
@@ -242,6 +243,18 @@ function joyride.spawn_mothership()
       mothership:setFuel(state.fuel)
    end
    return configure_mothership(state, mothership)
+end
+
+function joyride.follow_mothership(enabled)
+   local state = cache()
+   if not state then return fail("no Joyride session is active") end
+   state.follow_mothership = enabled ~= false
+   return true
+end
+
+function joyride.mothership_follows()
+   local state = cache()
+   return state ~= nil and state.follow_mothership ~= false
 end
 
 local function begin_session(state)
@@ -450,6 +463,7 @@ function joyride.takeoff()
    local state, reason = validate_landable()
    if not state then return fail(reason) end
    player.allowSave(false)
+   if state.follow_mothership == false then return true end
    return joyride.spawn_mothership() ~= nil
 end
 

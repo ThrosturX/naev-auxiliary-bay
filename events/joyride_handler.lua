@@ -26,7 +26,8 @@ end
 
 function ENTER_JUMPIN_MOTHERSHIP ( token )
     local state = naev.cache().joyride
-    if not state or state.token ~= token then return end
+    if not state or state.token ~= token
+        or not joyride.mothership_follows() then return end
     joyride.spawn_mothership()
     -- make spawn_mothership jump in from this system next time if following player
     local nc = naev.cache()
@@ -48,6 +49,7 @@ function ENTER_SCHEDULE_MOTHERSHIP ()
     if naev.cache().joyride.noland then
         player.landAllow( false, tostring(naev.cache().joyride.noland) )
     end
+    if not joyride.mothership_follows() then return end
     -- gotta jump in the player's ship at some point
     hook.timer( math.random(6, 20), "ENTER_JUMPIN_MOTHERSHIP",
         naev.cache().joyride.token )
