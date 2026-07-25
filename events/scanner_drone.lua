@@ -17,6 +17,7 @@
 
 function create()
 	hook.enter("scan_drone_enter")
+	hook.ship_swap("scan_drone_enter")
 end
 
 local DRONE_SEARCH_INTERVAL = 3
@@ -28,8 +29,6 @@ function scan_drone_enter()
             return
         end
     end
-    -- maybe we'll change ships somehow, e.g. with the aux bay
-    hook.ship_swap("scan_drone_enter")
 end
 
 local function enable( t )
